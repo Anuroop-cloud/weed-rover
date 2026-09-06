@@ -4,7 +4,7 @@ Handles camera hardware capture, FPS measurement, and provides frames as standar
 """
 
 import time
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 import cv2
 import numpy as np
 
@@ -90,25 +90,38 @@ class Camera:
         return self._fps
 
     @staticmethod
-    def draw_fps(frame: np.ndarray, fps: float) -> np.ndarray:
+    def draw_fps(frame: np.ndarray, fps: float, detection_count: Optional[Any] = None) -> np.ndarray:
         """
-        Draws an aesthetic FPS overlay badge on the top-left of the frame.
+        Draws an aesthetic FPS and optional detection count overlay badge on the top-left of the frame.
         """
-        fps_text = f"FPS: {fps:.1f}"
+        if detection_count is not None:
+            if isinstance(detection_count, str):
+                fps_text = f"FPS: {fps:.0f} | {detection_count}"
+            else:
+                fps_text = f"FPS: {fps:.1f} | Detections: {detection_count}"
+        else:
+            fps_text = f"FPS: {fps:.1f}"
+
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.65
+        thickness = 2
+        (text_w, text_h), baseline = cv2.getTextSize(fps_text, font, font_scale, thickness)
         
-        # Badge background
-        cv2.rectangle(frame, (10, 10), (130, 42), (20, 20, 20), -1)
-        cv2.rectangle(frame, (10, 10), (130, 42), (0, 255, 0), 1)
+        # Dynamic badge background
+        x1, y1 = 10, 10
+        x2, y2 = x1 + text_w + 16, y1 + text_h + 16
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (20, 20, 20), -1)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
         
-        # FPS text
+        # Badge text
         cv2.putText(
             frame,
             fps_text,
-            (18, 33),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.65,
+            (x1 + 8, y1 + text_h + 7),
+            font,
+            font_scale,
             (0, 255, 0),
-            2,
+            thickness,
             cv2.LINE_AA,
         )
         return frame
@@ -119,6 +132,17 @@ class Camera:
             self.cap.release()
             self.cap = None
             print("[Camera] Hardware resources released.")
+
+    @staticmethod
+    def list_available_cameras(max_tested: int = 5) -> list:
+        """Scans camera indices and returns a list of available index integers."""
+        available = []
+        for i in range(max_tested):
+            temp_cap = cv2.VideoCapture(i)
+            if temp_cap.isOpened():
+                available.append(i)
+                temp_cap.release()
+        return available
 
     def __enter__(self):
         return self

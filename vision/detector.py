@@ -28,6 +28,13 @@ class Detection:
     center_x: int
     center_y: int
 
+    def to_debug_string(self) -> str:
+        """Format detection for terminal debug output: class=<name> confidence=<confidence> bbox=(x1,y1,x2,y2) center=(cx,cy)"""
+        return f"class={self.class_name} confidence={self.confidence:.2f} bbox=({self.x1},{self.y1},{self.x2},{self.y2}) center=({self.center_x},{self.center_y})"
+
+    def __str__(self) -> str:
+        return self.to_debug_string()
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert detection data to dictionary format."""
         return {
@@ -112,14 +119,24 @@ class YOLODetector:
         if result.boxes is None:
             return detections
 
+        h, w = frame.shape[:2]
+
         for box in result.boxes:
-            # Extract coordinates
-            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-            conf = float(box.conf[0].item())
+            # Extract coordinates (ultralytics xyxy returns absolute pixel coords of input frame)
+            raw_x1, raw_y1, raw_x2, raw_y2 = map(int, box.xyxy[0].tolist())
+            x1 = max(0, min(w, raw_x1))
+            y1 = max(0, min(h, raw_y1))
+            x2 = max(0, min(w, raw_x2))
+            y2 = max(0, min(h, raw_y2))
+
+            # Ensure confidence is strictly between 0.0 and 1.0
+            raw_conf = float(box.conf[0].item())
+            conf = max(0.0, min(1.0, raw_conf))
+
             cls_id = int(box.cls[0].item())
             cls_name = self.model.names.get(cls_id, f"class_{cls_id}")
 
-            # Compute centroid (ideal for laser/spray aim coordinates)
+            # Compute centroid (midpoint of the bounding box)
             cx = int((x1 + x2) / 2)
             cy = int((y1 + y2) / 2)
 

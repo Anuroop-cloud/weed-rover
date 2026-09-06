@@ -3,6 +3,12 @@ Unit and integration tests for camera and detector components.
 Can run in headless environments using synthetic test images.
 """
 
+import os
+import sys
+
+# Ensure repository root is on sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import numpy as np
 import pytest
 from vision.camera import Camera
@@ -50,3 +56,32 @@ def test_detector_on_blank_frame():
     # Drawing test
     annotated = detector.draw_detections(dummy_frame, detections)
     assert annotated.shape == (480, 640, 3)
+
+
+def test_detection_debug_format():
+    """Verify debug string follows exact requested format: class=<name> confidence=<conf> bbox=(x1,y1,x2,y2) center=(cx,cy)."""
+    det = Detection(
+        class_id=1,
+        class_name="crop",
+        confidence=0.923,
+        box=[50, 60, 200, 250],
+        x1=50,
+        y1=60,
+        x2=200,
+        y2=250,
+        center_x=125,
+        center_y=155
+    )
+    debug_str = det.to_debug_string()
+    expected = "class=crop confidence=0.92 bbox=(50,60,200,250) center=(125,155)"
+    assert debug_str == expected
+    assert str(det) == expected
+
+
+def test_camera_fps_with_detection_count():
+    """Verify FPS overlay with detection count works seamlessly."""
+    dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    annotated = Camera.draw_fps(dummy_frame, 28.4, detection_count=5)
+    assert annotated.shape == (480, 640, 3)
+    assert isinstance(annotated, np.ndarray)
+
