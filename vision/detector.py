@@ -4,6 +4,7 @@ Provides modular YOLO-based object detection on OpenCV/NumPy frames,
 returning structured bounding boxes, confidence scores, and centroid targeting coordinates.
 """
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 import cv2
@@ -61,20 +62,31 @@ class YOLODetector:
 
     def __init__(
         self,
-        model_path: str = "yolov8n.pt",
+        model_path: str = "models/best.pt",
         conf_threshold: float = 0.35,
         device: Optional[str] = None
     ):
         """
         Args:
-            model_path: Path or identifier for the model weights (default: 'yolov8n.pt').
+            model_path: Path or identifier for the model weights (default: 'models/best.pt').
             conf_threshold: Default confidence threshold for detections.
             device: Computation device ('cpu', 'cuda', etc.). Defaults to auto-selection.
         """
         self.model_path = model_path
         self.conf_threshold = conf_threshold
         self.device = device
-        
+
+        if not os.path.exists(self.model_path):
+            # Check if it's an official Ultralytics stock model
+            stock_models = {"yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolov8l.pt", "yolov8x.pt"}
+            if os.path.basename(self.model_path).lower() not in stock_models:
+                raise FileNotFoundError(
+                    f"Model weights file not found at '{self.model_path}'. "
+                    "The custom YOLO model must be trained first. "
+                    "Train on 'weed_dataset_yolo/data.yaml' and place best weights in 'models/best.pt'. "
+                    "Alternatively, pass '--model yolov8n.pt' to use the pretrained baseline."
+                )
+
         print(f"[Detector] Loading YOLO model from '{self.model_path}'...")
         self.model = YOLO(self.model_path)
         if self.device:

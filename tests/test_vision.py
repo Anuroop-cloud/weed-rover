@@ -85,3 +85,19 @@ def test_camera_fps_with_detection_count():
     assert annotated.shape == (480, 640, 3)
     assert isinstance(annotated, np.ndarray)
 
+
+def test_yolo_missing_model_raises_error():
+    """Verify YOLODetector raises clear FileNotFoundError if custom model path does not exist."""
+    with pytest.raises(FileNotFoundError) as exc_info:
+        YOLODetector(model_path="models/nonexistent_model.pt")
+    assert "Model weights file not found" in str(exc_info.value)
+
+
+def test_black_dot_detector_alias():
+    """Verify vision.black_dot_detector exports compatible detector classes."""
+    from vision.black_dot_detector import BlackDotDetector, DualDotDetector, DotDetection, Target
+    assert BlackDotDetector is DualDotDetector
+    detector = BlackDotDetector()
+    assert hasattr(detector, "detect")
+
+
