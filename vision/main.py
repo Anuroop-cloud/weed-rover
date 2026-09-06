@@ -4,7 +4,15 @@ Orchestrates: Camera Capture -> YOLO Inference -> Visual Annotations -> Real-tim
 """
 
 import argparse
+import os
 import sys
+import time
+
+# Ensure repository root is in sys.path so vision and config are always importable
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 import cv2
 
 try:
@@ -12,8 +20,13 @@ try:
     from vision.detector import YOLODetector
     from vision.target_detector import ColorTargetDetector
     from vision.dual_dot_detector import DualDotDetector
+    from vision.robot_geometry import RobotGeometry
+    from vision.target_controller import TargetController, RoverState
     from config.vision_config import (
         CAMERA_DEVICE_INDEX,
+        FRAME_WIDTH,
+        FRAME_HEIGHT,
+        CAMERA_FPS,
         BLACK_DOT_LOWER_HSV,
         BLACK_DOT_UPPER_HSV,
         BLACK_DOT_MIN_AREA,
@@ -25,13 +38,31 @@ try:
         STABILITY_MIN_HITS,
         MAX_MISSED_FRAMES,
         TARGET_MATCH_DISTANCE,
+        CAMERA_HEIGHT_CM,
+        CAMERA_TILT_DEG,
+        CAMERA_FOV_HORIZONTAL_DEG,
+        CAMERA_FOV_VERTICAL_DEG,
+        CAMERA_TO_LED_FORWARD_CM,
+        CAMERA_TO_LED_LATERAL_CM,
+        LED_HEIGHT_CM,
+        STATE_MACHINE_TARGET_CLASS,
+        ALIGNMENT_TOLERANCE_XY_CM,
+        CAMERA_BLIND_SPOT_ROW_PX,
+        SIMULATED_APPROACH_SPEED_CM_S,
+        LED_FIRE_DURATION_SEC,
+        COMPLETED_TARGET_EXPIRY_SEC,
     )
 except ImportError:
     from camera import Camera
     from detector import YOLODetector
     from target_detector import ColorTargetDetector
     from dual_dot_detector import DualDotDetector
+    from robot_geometry import RobotGeometry
+    from target_controller import TargetController, RoverState
     CAMERA_DEVICE_INDEX = 1
+    FRAME_WIDTH = 640
+    FRAME_HEIGHT = 480
+    CAMERA_FPS = 30
     BLACK_DOT_LOWER_HSV = (0, 0, 0)
     BLACK_DOT_UPPER_HSV = (180, 255, 75)
     BLACK_DOT_MIN_AREA = 25.0
@@ -43,6 +74,19 @@ except ImportError:
     STABILITY_MIN_HITS = 3
     MAX_MISSED_FRAMES = 3
     TARGET_MATCH_DISTANCE = 30.0
+    CAMERA_HEIGHT_CM = 20.0
+    CAMERA_TILT_DEG = 35.0
+    CAMERA_FOV_HORIZONTAL_DEG = 70.0
+    CAMERA_FOV_VERTICAL_DEG = 55.0
+    CAMERA_TO_LED_FORWARD_CM = 5.0
+    CAMERA_TO_LED_LATERAL_CM = 0.0
+    LED_HEIGHT_CM = 10.0
+    STATE_MACHINE_TARGET_CLASS = "black_dot"
+    ALIGNMENT_TOLERANCE_XY_CM = 1.5
+    CAMERA_BLIND_SPOT_ROW_PX = 430
+    SIMULATED_APPROACH_SPEED_CM_S = 8.0
+    LED_FIRE_DURATION_SEC = 1.5
+    COMPLETED_TARGET_EXPIRY_SEC = 15.0
 
 
 def parse_args():
@@ -71,6 +115,7 @@ def parse_args():
     parser.add_argument("--v-max", type=int, default=BLACK_DOT_UPPER_HSV[2], help=f"Maximum brightness/Value for black threshold (default: {BLACK_DOT_UPPER_HSV[2]})")
     parser.add_argument("--no-mask", action="store_true", help="Disable the separate threshold mask debug window")
     parser.add_argument("--model", type=str, default="yolov8n.pt", help="Path to YOLO model weights (default: yolov8n.pt)")
+    parser.add_argument("--fps", type=float, default=CAMERA_FPS, help=f"Target frame rate limit (default: {CAMERA_FPS})")
     parser.add_argument("--conf", type=float, default=0.35, help="Confidence threshold (default: 0.35)")
     parser.add_argument("--debug", action="store_true", help="Print detection coordinates to terminal")
     return parser.parse_args()
@@ -91,11 +136,11 @@ def main():
     
     print("=" * 60)
     print("Starting Weed Rover Vision Pipeline")
-    print(f"Mode: {args.detector.upper()} | Device: {args.camera} | Resolution: {args.width}x{args.height}")
+    print(f"Mode: {args.detector.upper()} | Device: {args.camera} | Resolution: {args.width}x{args.height} | FPS: {args.fps}")
     print("=" * 60)
 
     # 1. Initialize Camera Stream
-    camera = Camera(device_id=args.camera, width=args.width, height=args.height)
+    camera = Camera(device_id=args.camera, width=args.width, height=args.height, fps_limit=args.fps)
     if not camera.is_opened:
         print("[Error] Failed to initialize camera. Exiting.")
         sys.exit(1)
@@ -120,6 +165,26 @@ def main():
             max_missed_frames=MAX_MISSED_FRAMES,
             match_distance=TARGET_MATCH_DISTANCE,
         )
+        geometry = RobotGeometry(
+            camera_height_cm=CAMERA_HEIGHT_CM,
+            camera_tilt_deg=CAMERA_TILT_DEG,
+            image_width=args.width,
+            image_height=args.height,
+            fov_horizontal_deg=CAMERA_FOV_HORIZONTAL_DEG,
+            fov_vertical_deg=CAMERA_FOV_VERTICAL_DEG,
+            camera_to_led_forward_cm=CAMERA_TO_LED_FORWARD_CM,
+            camera_to_led_lateral_cm=CAMERA_TO_LED_LATERAL_CM,
+            led_height_cm=LED_HEIGHT_CM,
+        )
+        controller = TargetController(
+            geometry=geometry,
+            target_class=STATE_MACHINE_TARGET_CLASS,
+            alignment_tolerance_cm=ALIGNMENT_TOLERANCE_XY_CM,
+            blind_spot_row_px=CAMERA_BLIND_SPOT_ROW_PX,
+            approach_speed_cm_s=SIMULATED_APPROACH_SPEED_CM_S,
+            fire_duration_sec=LED_FIRE_DURATION_SEC,
+            completed_expiry_sec=COMPLETED_TARGET_EXPIRY_SEC,
+        )
         window_name = "Main Camera"
         if show_mask:
             cv2.namedWindow(black_mask_window, cv2.WINDOW_NORMAL)
@@ -139,6 +204,8 @@ def main():
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     print(f"\n[Pipeline Ready] Active Mode: {args.detector.upper()}. Streaming... Press 'q' or ESC to exit.\n")
 
+    last_time = time.time()
+
     try:
         while True:
             # Step A: Capture OpenCV frame
@@ -147,18 +214,25 @@ def main():
                 print("[Warning] Frame capture failed. Exiting loop.")
                 break
 
+            now = time.time()
+            dt = max(0.001, min(0.2, now - last_time))
+            last_time = now
+
             if args.detector == "dot":
                 # Step B1: Run Dual Dot Detection (Black + Blue) with Temporal Stability & ROI
                 targets, mask_black, mask_blue = detector.detect(frame)
 
-                # Step C1: Debug terminal logging for stable targets
-                if args.debug:
-                    for target in targets:
-                        if target.is_stable:
-                            print(target.to_debug_string())
+                # Step C1: Update Lock-and-Execute State Machine
+                prev_state = controller.state
+                status = controller.update(targets, delta_time=dt)
+
+                if args.debug and controller.state != prev_state:
+                    print(f"[STATE MACHINE] {controller.last_state_change_msg}")
 
                 # Step D1: Draw ROI boundary, Red/White boxes for Black dots, Blue boxes for Blue dots
                 annotated_frame = detector.draw_detections(frame, targets)
+                annotated_frame = controller.draw_hud(annotated_frame)
+
                 black_count = sum(1 for t in targets if t.is_stable and t.class_name == "black_dot")
                 blue_count = sum(1 for t in targets if t.is_stable and t.class_name == "blue_dot")
                 count = f"Black: {black_count} | Blue: {blue_count}"

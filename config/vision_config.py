@@ -6,6 +6,7 @@ Configuration settings for camera, detector, and display settings.
 CAMERA_DEVICE_INDEX = 1  # 0: Built-in laptop webcam, 1: External USB camera
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
+CAMERA_FPS = 30
 
 # ==============================================================================
 # BLACK DOT DETECTOR SETTINGS (Tune these for mock farm / grid floor)
@@ -58,3 +59,39 @@ MORPH_KERNEL_SIZE = 5
 BOX_COLOR = (0, 220, 255)       # BGR yellow/gold
 CENTROID_COLOR = (0, 0, 255)    # BGR red for crosshairs
 CROSSHAIR_SIZE = 8
+
+# ==============================================================================
+# ROBOT GEOMETRY & CAMERA MOUNTING (PLACEHOLDER VALUES - MEASURE REAL ROBOT)
+# ==============================================================================
+# NOTE: These values are INITIAL MATHEMATICAL PLACEHOLDERS for development.
+# They MUST be replaced after measuring the physical rover, camera mount, and lenses.
+
+CAMERA_HEIGHT_CM = 20.0             # Height of camera optical center above ground plane (Z=0)
+CAMERA_TILT_DEG = 35.0              # Camera downward tilt angle from horizontal in degrees
+
+CAMERA_RESOLUTION_WIDTH = 640       # Image width in pixels
+CAMERA_RESOLUTION_HEIGHT = 480      # Image height in pixels
+
+CAMERA_FOV_HORIZONTAL_DEG = 70.0    # Lens horizontal Field of View in degrees
+CAMERA_FOV_VERTICAL_DEG = 55.0      # Lens vertical Field of View in degrees
+
+LED_HEIGHT_CM = 10.0                # Height of LED pointer above ground plane (Z=0)
+
+# Position of LED relative to camera/robot reference frame
+# Convention: +X = Right, +Y = Forward, +Z = Up
+CAMERA_TO_LED_FORWARD_CM = 5.0      # Forward distance from camera to LED (along +Y)
+CAMERA_TO_LED_LATERAL_CM = 0.0      # Lateral distance from camera to LED (along +X)
+
+TARGET_FINAL_DISTANCE_CM = 5.0      # Desired distance to target point in cm
+
+# ==============================================================================
+# LOCK-AND-EXECUTE STATE MACHINE & BLIND-SPOT CONTROLLER SETTINGS
+# ==============================================================================
+STATE_MACHINE_TARGET_CLASS = "black_dot"    # Class to track and engage ('black_dot' or 'blue_dot')
+ALIGNMENT_TOLERANCE_XY_CM = 1.5             # Target alignment tolerance in cm (stop when within this distance of LED)
+CAMERA_BLIND_SPOT_ROW_PX = 430              # Pixel row (Y) above which dot enters camera lower blind spot
+SIMULATED_APPROACH_SPEED_CM_S = 8.0         # Simulated rover speed toward target in cm/s for dead-reckoning
+LED_FIRE_DURATION_SEC = 1.5                 # Duration to hold prototype LED firing signal in seconds
+COMPLETED_TARGET_EXPIRY_SEC = 15.0          # Time to remember completed targets to prevent immediate re-targeting
+
+

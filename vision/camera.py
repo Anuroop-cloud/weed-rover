@@ -23,14 +23,18 @@ class Camera:
         self,
         device_id: int = 0,
         width: int = 640,
-        height: int = 480
+        height: int = 480,
+        fps_limit: Optional[float] = 30.0,
     ):
         self.device_id = device_id
         self.width = width
         self.height = height
+        self.fps_limit = float(fps_limit) if fps_limit and fps_limit > 0 else None
+        self._target_frame_time = (1.0 / self.fps_limit) if self.fps_limit else 0.0
         
         self.cap: Optional[cv2.VideoCapture] = None
         self._prev_time = time.perf_counter()
+        self._last_frame_end = time.perf_counter()
         self._fps = 0.0
         
         self._initialize_camera()
@@ -49,11 +53,13 @@ class Camera:
         # Set requested resolution
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        if self.fps_limit:
+            self.cap.set(cv2.CAP_PROP_FPS, self.fps_limit)
         
         # Read actual set resolution
         actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(f"[Camera] Successfully initialized. Active resolution: {actual_w}x{actual_h}")
+        print(f"[Camera] Successfully initialized. Active resolution: {actual_w}x{actual_h} | Target FPS: {self.fps_limit or 'unlimited'}")
         return True
 
     @property
@@ -63,13 +69,21 @@ class Camera:
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
         """
-        Reads the next frame from the camera and calculates FPS.
+        Reads the next frame from the camera and calculates smoothed FPS.
+        Enforces fps_limit to avoid runaway CPU spin.
 
         Returns:
             Tuple[bool, Optional[np.ndarray]]: (success_flag, frame_as_numpy_array)
         """
         if not self.is_opened:
             return False, None
+
+        # Enforce frame rate pacing if fps_limit is configured
+        if self._target_frame_time > 0:
+            elapsed = time.perf_counter() - self._last_frame_end
+            sleep_needed = self._target_frame_time - elapsed
+            if sleep_needed > 0.001:
+                time.sleep(sleep_needed)
 
         ret, frame = self.cap.read()
         if not ret or frame is None:
@@ -80,8 +94,10 @@ class Camera:
         current_time = time.perf_counter()
         delta = current_time - self._prev_time
         if delta > 0:
-            self._fps = 1.0 / delta
+            instant_fps = 1.0 / delta
+            self._fps = 0.8 * self._fps + 0.2 * instant_fps if self._fps > 0 else instant_fps
         self._prev_time = current_time
+        self._last_frame_end = time.perf_counter()
 
         return True, frame
 
