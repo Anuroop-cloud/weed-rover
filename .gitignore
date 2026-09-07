@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+yolov8n.pt
+weed_dataset/
+weed_dataset_yolo/
+dataset_preview/
+previews/
+runs/
+models/*.pt
+!models/.gitkeep
+__pycache__/
+.venv/
