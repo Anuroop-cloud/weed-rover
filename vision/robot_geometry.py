@@ -1,52 +1,57 @@
 """
 Robot Geometry Module for weed-rover.
 
+Top-Down Camera Floor Projection Model:
 Converts 2D camera image coordinates (pixel_x, pixel_y) into an estimated 2D ground-plane
-position (X_cm, Y_cm) relative to the rover, assuming a flat ground plane (Z = 0).
+position (X_cm, Y_cm) relative to the rover, assuming a top-down camera looking straight
+down at a flat floor workspace (ground plane Z = 0).
 
 Coordinate Convention:
-    +Y = Forward direction of the rover
-    -Y = Behind the rover
-    +X = Right direction of the rover
-    -X = Left direction of the rover
-    +Z = Upward (ground is at Z = 0)
+    Robot ground frame:
+        +Y = Robot forward
+        -Y = Robot backward
+        +X = Robot right
+        -X = Robot left
+        +Z = Upward (ground plane is at Z = 0)
 
-Camera Reference Origin:
-    The camera optical center is located at (X = 0, Y = 0, Z = CAMERA_HEIGHT_CM).
-    The camera is tilted downward from the horizontal plane by CAMERA_TILT_DEG.
+    Camera image convention:
+        image TOP    = +Y (forward, v < cy)
+        image BOTTOM = -Y (backward, v > cy)
+        image RIGHT  = +X (right, u > cx)
+        image LEFT   = -X (left, u < cx)
+        image CENTER = (0, 0) (point directly below camera optical center)
 
-Mathematical Model:
-    1. Pinhole Camera Model (Intrinsic parameters):
-       Given image dimensions (W, H) and Field of View (FOV_h, FOV_v):
-           c_x = W / 2.0,  c_y = H / 2.0
-           f_x = (W / 2.0) / tan(FOV_h / 2.0)
-           f_y = (H / 2.0) / tan(FOV_v / 2.0)
+Mathematical Model (Ideal Top-Down Pinhole Camera):
+    Given:
+        u, v   = target pixel coordinates (pixel_x, pixel_y)
+        cx, cy = principal point (image_width / 2, image_height / 2)
+        H      = camera height above floor (camera_height_cm)
+        fx, fy = focal lengths in pixels
 
-       For pixel (u, v):
-           x_c = (u - c_x) / f_x   (normalized coordinate along camera X-axis)
-           y_c = (v - c_y) / f_y   (normalized coordinate along camera Y-axis, pointing down)
+    Focal lengths derived from Field of View:
+        fx = (image_width / 2.0) / tan(fov_horizontal / 2.0)
+        fy = (image_height / 2.0) / tan(fov_vertical / 2.0)
 
-    2. Camera-to-Rover Frame Rotation:
-       The camera optical axis points forward and tilted downward by pitch angle theta.
-       A 3D point (X_c, Y_c, Z_c) in camera frame relates to rover frame (X, Y, Z) by:
-           X = X_c = x_c * Z_c
-           Y = Z_c * cos(theta) - Y_c * sin(theta) = Z_c * (cos(theta) - y_c * sin(theta))
-           Z = h - Z_c * sin(theta) - Y_c * cos(theta) = h - Z_c * (sin(theta) + y_c * cos(theta))
+    Ground coordinates in camera frame:
+        X_camera = (u - cx) * H / fx
+        Y_camera = (cy - v) * H / fy
 
-    3. Flat Ground Plane Intersection (Z = 0):
-       Setting Z = 0 gives:
-           Z_c = h / (sin(theta) + y_c * cos(theta))
+Camera-to-LED / Tool Frame Transformation:
+    The camera and tool/LED are physically separated by configurable offsets:
+        CAMERA_TO_LED_FORWARD_CM: offset along robot forward (+Y) axis
+        CAMERA_TO_LED_LATERAL_CM: offset along robot lateral (+X) axis
 
-       Valid intersection requires:
-           sin(theta) + y_c * cos(theta) > 0  (ray points down towards ground)
+    Transformation formula:
+        X_led = X_camera - CAMERA_TO_LED_LATERAL_CM
+        Y_led = Y_camera - CAMERA_TO_LED_FORWARD_CM
 
-       Substituting Z_c back yields the ground position:
-           X_cm = (h * x_c) / (sin(theta) + y_c * cos(theta))
-           Y_cm = h * (cos(theta) - y_c * sin(theta)) / (sin(theta) + y_c * cos(theta))
+    Example:
+        If LED is physically 5 cm forward of the camera, a point directly below
+        the camera (X_cam=0, Y_cam=0) has LED coordinates (0, -5.0 cm) — 5 cm behind the LED.
 
-NOTE:
-    The geometric parameters in config/vision_config.py are INITIAL MATHEMATICAL PLACEHOLDERS.
-    They must be calibrated against measured ground positions on the physical robot.
+Future Calibration:
+    Designed to accept an empirical 3x3 planar homography matrix H mapping
+    [u, v, 1]^T -> [X_floor, Y_floor, 1]^T when physical calibration grid data is collected.
 """
 
 from dataclasses import dataclass
@@ -76,13 +81,13 @@ class CalibrationPoint:
 class RobotGeometry:
     """
     Translates 2D image pixel coordinates into 2D ground-plane coordinates (X_cm, Y_cm)
-    relative to the rover reference frame.
+    relative to the rover reference frame using an ideal top-down pinhole camera model.
     """
 
     def __init__(
         self,
         camera_height_cm: float = 20.0,
-        camera_tilt_deg: float = 35.0,
+        camera_tilt_deg: Optional[float] = None,
         image_width: int = 640,
         image_height: int = 480,
         fov_horizontal_deg: float = 70.0,
@@ -94,19 +99,20 @@ class RobotGeometry:
     ):
         """
         Args:
-            camera_height_cm: Camera optical center height above ground (Z=0).
-            camera_tilt_deg: Downward pitch angle of camera from horizontal in degrees.
+            camera_height_cm: Camera lens optical center height above floor (Z=0).
+            camera_tilt_deg: DEPRECATED. Physical camera is top-down (pointing straight down).
+                             Accepted for backward compatibility with legacy callers; not used in math.
             image_width: Camera frame width in pixels.
             image_height: Camera frame height in pixels.
-            fov_horizontal_deg: Horizontal Field of View in degrees.
-            fov_vertical_deg: Vertical Field of View in degrees.
+            fov_horizontal_deg: Lens horizontal Field of View in degrees.
+            fov_vertical_deg: Lens vertical Field of View in degrees.
             camera_to_led_forward_cm: Offset from camera to LED along forward (+Y) axis.
             camera_to_led_lateral_cm: Offset from camera to LED along lateral (+X) axis.
-            led_height_cm: Height of LED pointer above ground.
-            max_ground_distance_cm: Maximum realistic ground distance before discarding ray.
+            led_height_cm: Height of LED pointer/tool above ground.
+            max_ground_distance_cm: Maximum realistic ground distance before discarding coordinates.
         """
         self.camera_height_cm = float(camera_height_cm)
-        self.camera_tilt_deg = float(camera_tilt_deg)
+        self.camera_tilt_deg = float(camera_tilt_deg) if camera_tilt_deg is not None else 0.0
         self.image_width = int(image_width)
         self.image_height = int(image_height)
         self.fov_horizontal_deg = float(fov_horizontal_deg)
@@ -116,11 +122,14 @@ class RobotGeometry:
         self.led_height_cm = float(led_height_cm)
         self.max_ground_distance_cm = float(max_ground_distance_cm)
 
-        # Precompute camera intrinsic and rotation parameters
+        # Future empirical planar homography matrix placeholder (3x3 matrix)
+        self.homography_matrix: Optional[Any] = None
+
+        # Precompute camera intrinsic parameters (cx, cy, fx, fy)
         self._update_intrinsics()
 
     def _update_intrinsics(self) -> None:
-        """Computes principal point, focal lengths, and trigonometric terms."""
+        """Computes principal point and focal lengths from resolution and FOV."""
         self.cx = self.image_width / 2.0
         self.cy = self.image_height / 2.0
 
@@ -128,63 +137,65 @@ class RobotGeometry:
         half_fov_v = math.radians(self.fov_vertical_deg / 2.0)
 
         # Focal lengths in pixels (fx, fy)
-        self.fx = self.cx / math.tan(half_fov_h) if half_fov_h > 0 else 1.0
-        self.fy = self.cy / math.tan(half_fov_v) if half_fov_v > 0 else 1.0
+        self.fx = (self.image_width / 2.0) / math.tan(half_fov_h) if half_fov_h > 0 else 1.0
+        self.fy = (self.image_height / 2.0) / math.tan(half_fov_v) if half_fov_v > 0 else 1.0
 
-        # Camera tilt angle
-        self.tilt_rad = math.radians(self.camera_tilt_deg)
-        self.sin_tilt = math.sin(self.tilt_rad)
-        self.cos_tilt = math.cos(self.tilt_rad)
+    def set_homography(self, homography_matrix: Optional[Any]) -> None:
+        """
+        Sets a 3x3 planar homography matrix for empirical ground-plane calibration.
+        When set to None, the default ideal top-down pinhole projection model is used.
+        """
+        self.homography_matrix = homography_matrix
 
     def pixel_to_ground(
         self, pixel_x: float, pixel_y: float
     ) -> Optional[Tuple[float, float]]:
         """
         Converts 2D image coordinates (pixel_x, pixel_y) to 2D ground-plane coordinates (X_cm, Y_cm)
-        relative to the rover reference frame.
+        relative to the point on the floor directly below the camera optical center.
+
+        Coordinate conventions:
+            +Y = robot forward (image TOP: v < cy)
+            -Y = robot backward (image BOTTOM: v > cy)
+            +X = robot right (image RIGHT: u > cx)
+            -X = robot left (image LEFT: u < cx)
+            (0, 0) = image center (u = cx, v = cy)
+
+        Formulas:
+            X_camera = (u - cx) * H / fx
+            Y_camera = (cy - v) * H / fy
 
         Args:
-            pixel_x: Horizontal pixel position (0 <= pixel_x < image_width).
-            pixel_y: Vertical pixel position (0 <= pixel_y < image_height).
+            pixel_x: Horizontal pixel position (u).
+            pixel_y: Vertical pixel position (v).
 
         Returns:
-            Tuple[float, float]: (X_cm, Y_cm) where:
-                X_cm: Lateral distance (+X is right, -X is left).
-                Y_cm: Forward distance (+Y is forward in front of rover).
-            Returns None if the pixel ray does not intersect the ground plane in front of the rover
-            (e.g., ray points at or above the horizon, or beyond max_ground_distance_cm).
+            Tuple[float, float]: (X_cm, Y_cm) ground coordinates in cm,
+            or None if input is invalid (NaN/Inf) or exceeds max_ground_distance_cm.
         """
         # Guard against non-numeric inputs
         if math.isnan(pixel_x) or math.isnan(pixel_y) or math.isinf(pixel_x) or math.isinf(pixel_y):
             return None
 
-        # Normalized coordinates on unit-distance camera image plane
-        # x_c > 0: right of optical center
-        # y_c > 0: below optical center (closer to ground)
-        x_c = (pixel_x - self.cx) / self.fx
-        y_c = (pixel_y - self.cy) / self.fy
-
-        # Denominator represents the vertical downward component of the ray:
-        # denom = sin(theta) + y_c * cos(theta)
-        denom = self.sin_tilt + (y_c * self.cos_tilt)
-
-        # If denom <= 0, the ray is horizontal or pointing upward into the sky (above the horizon)
-        # We require a small positive epsilon to prevent division by near-zero at the horizon
-        if denom <= 1e-5:
+        if self.fx <= 0 or self.fy <= 0 or self.camera_height_cm <= 0:
             return None
 
-        # Distance along camera optical axis to the ground plane (Z = 0)
-        z_c = self.camera_height_cm / denom
-        if z_c <= 0:
-            return None
+        # Hook for future empirical planar homography calibration
+        if self.homography_matrix is not None:
+            raise NotImplementedError(
+                "Empirical planar homography calibration is not yet implemented. "
+                "Use the default top-down pinhole model (homography_matrix=None)."
+            )
 
-        # Forward ground distance (Y) and lateral ground distance (X)
-        # Y = z_c * (cos(theta) - y_c * sin(theta))
-        y_cm = z_c * (self.cos_tilt - (y_c * self.sin_tilt))
-        x_cm = x_c * z_c
+        u = float(pixel_x)
+        v = float(pixel_y)
 
-        # Reject points behind the camera or beyond max usable range
-        if y_cm <= 0 or y_cm > self.max_ground_distance_cm:
+        # Ideal top-down pinhole projection
+        x_cm = (u - self.cx) * self.camera_height_cm / self.fx
+        y_cm = (self.cy - v) * self.camera_height_cm / self.fy
+
+        # Check maximum ground distance boundary
+        if math.hypot(x_cm, y_cm) > self.max_ground_distance_cm:
             return None
 
         return (round(float(x_cm), 2), round(float(y_cm), 2))
@@ -194,7 +205,7 @@ class RobotGeometry:
     ) -> Optional[Tuple[float, float]]:
         """
         Alias for pixel_to_ground.
-        Exposes ground point coordinate relative to the camera/rover reference frame.
+        Exposes ground point coordinates relative to the camera reference frame.
         """
         return self.pixel_to_ground(pixel_x, pixel_y)
 
@@ -202,12 +213,21 @@ class RobotGeometry:
         self, x_robot_cm: float, y_robot_cm: float
     ) -> Tuple[float, float]:
         """
-        Transforms a ground point from the camera/robot reference frame
-        to the LED emitter reference frame.
+        Transforms a ground point from camera-frame floor coordinates
+        to LED/tool-frame floor coordinates.
+
+        Sign convention:
+            X_led = X_camera - CAMERA_TO_LED_LATERAL_CM
+            Y_led = Y_camera - CAMERA_TO_LED_FORWARD_CM
+
+        Example:
+            If the LED is physically 5 cm forward of the camera (CAMERA_TO_LED_FORWARD_CM = 5.0),
+            a point directly below the camera (X_cam=0, Y_cam=0) appears at Y_led = -5.0 cm
+            (5 cm behind the LED in LED coordinates).
 
         Args:
-            x_robot_cm: Lateral distance in robot reference frame.
-            y_robot_cm: Forward distance in robot reference frame.
+            x_robot_cm: Lateral distance in robot/camera reference frame (+X = right).
+            y_robot_cm: Forward distance in robot/camera reference frame (+Y = forward).
 
         Returns:
             Tuple[float, float]: (X_led_cm, Y_led_cm) relative to the LED position.

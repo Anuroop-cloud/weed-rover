@@ -59,8 +59,8 @@ def parse_args():
     parser.add_argument(
         "--project",
         type=str,
-        default="runs/train",
-        help="Project directory to save outputs (default: runs/train)",
+        default="runs",
+        help="Project directory to save outputs (default: runs)",
     )
     parser.add_argument(
         "--name",
@@ -71,8 +71,8 @@ def parse_args():
     parser.add_argument(
         "--workers",
         type=int,
-        default=4,
-        help="Number of dataloader worker processes (default: 4)",
+        default=0,
+        help="Number of dataloader worker processes (default: 0 for reliable Windows CPU execution)",
     )
     parser.add_argument(
         "--seed",
@@ -83,8 +83,8 @@ def parse_args():
     parser.add_argument(
         "--patience",
         type=int,
-        default=25,
-        help="Early stopping patience in epochs without mAP improvement (default: 25)",
+        default=8,
+        help="Early stopping patience in epochs without mAP improvement (default: 8)",
     )
     return parser.parse_args()
 

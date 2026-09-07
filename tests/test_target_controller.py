@@ -22,8 +22,8 @@ def test_controller() -> TargetController:
     """Fixture providing a TargetController with fast simulation times for unit testing."""
     geom = RobotGeometry(
         camera_height_cm=20.0,
-        camera_tilt_deg=35.0,
-        camera_to_led_forward_cm=5.0,
+        camera_tilt_deg=0.0,
+        camera_to_led_forward_cm=-15.0,  # Tool mounted 15 cm behind camera along travel path
         camera_to_led_lateral_cm=0.0,
     )
     return TargetController(
@@ -46,21 +46,21 @@ def test_initial_state_is_searching(test_controller):
 
 def test_closest_stable_target_selected(test_controller):
     """Verify closest stable black dot is selected and locked."""
-    # Far target at row 250 (farther)
+    # Far target at row 100 (farther ahead: Y ~ +6.1 cm)
     far_target = Target(
         class_name="black_dot",
         target_id=10,
         center_x=320,
-        center_y=250,
+        center_y=100,
         area=100.0,
         is_stable=True,
     )
-    # Near target at row 350 (nearer, smaller Y)
+    # Near target at row 220 (nearer ahead: Y ~ +0.9 cm)
     near_target = Target(
         class_name="black_dot",
         target_id=20,
         center_x=320,
-        center_y=350,
+        center_y=220,
         area=100.0,
         is_stable=True,
     )

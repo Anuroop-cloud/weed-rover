@@ -189,8 +189,17 @@ def main():
         height=args.height,
         fps_limit=args.fps,
     )
+    if not camera.is_opened and args.camera != 0:
+        print(f"[Camera Fallback] Camera index {args.camera} unavailable. Attempting fallback to built-in webcam (index 0)...")
+        camera = Camera(
+            device_id=0,
+            width=args.width,
+            height=args.height,
+            fps_limit=args.fps,
+        )
+
     if not camera.is_opened:
-        print(f"[Error] Failed to initialize camera at index {args.camera}. Exiting.")
+        print(f"[Error] Failed to initialize camera (tested index {args.camera} and fallback 0). Exiting.")
         sys.exit(1)
 
     # 2. Initialize Dual Dot Detector (Black & Blue dots)

@@ -61,26 +61,46 @@ CENTROID_COLOR = (0, 0, 255)    # BGR red for crosshairs
 CROSSHAIR_SIZE = 8
 
 # ==============================================================================
-# ROBOT GEOMETRY & CAMERA MOUNTING (PLACEHOLDER VALUES - MEASURE REAL ROBOT)
+# ROBOT GEOMETRY & CAMERA MOUNTING (PROVISIONAL PLACEHOLDERS - NOT CALIBRATED)
 # ==============================================================================
-# NOTE: These values are INITIAL MATHEMATICAL PLACEHOLDERS for development.
-# They MUST be replaced after measuring the physical rover, camera mount, and lenses.
+# NOTE: The physical robot design uses a TOP-DOWN camera mounted above the rover
+# and pointed straight downward at the floor, viewing the floor as a 2D workspace.
+# These values are INITIAL PROVISIONAL MATHEMATICAL PLACEHOLDERS for development.
+# They are NOT calibrated and MUST be measured and tuned on the physical hardware.
 
-CAMERA_HEIGHT_CM = 20.0             # Height of camera optical center above ground plane (Z=0)
-CAMERA_TILT_DEG = 35.0              # Camera downward tilt angle from horizontal in degrees
+CAMERA_HEIGHT_CM = 20.0             # PROVISIONAL: Camera lens optical center height above ground (Z=0)
+CAMERA_TILT_DEG = 0.0               # DEPRECATED: Physical camera is top-down (pointing straight down).
+                                    # Retained only for backwards compatibility with legacy callers.
 
-CAMERA_RESOLUTION_WIDTH = 640       # Image width in pixels
-CAMERA_RESOLUTION_HEIGHT = 480      # Image height in pixels
+CAMERA_RESOLUTION_WIDTH = 640       # Camera image width in pixels
+CAMERA_RESOLUTION_HEIGHT = 480      # Camera image height in pixels
 
-CAMERA_FOV_HORIZONTAL_DEG = 70.0    # Lens horizontal Field of View in degrees
-CAMERA_FOV_VERTICAL_DEG = 55.0      # Lens vertical Field of View in degrees
+CAMERA_FOV_HORIZONTAL_DEG = 70.0    # PROVISIONAL: Lens horizontal Field of View in degrees
+CAMERA_FOV_VERTICAL_DEG = 55.0      # PROVISIONAL: Lens vertical Field of View in degrees
 
-LED_HEIGHT_CM = 10.0                # Height of LED pointer above ground plane (Z=0)
+LED_HEIGHT_CM = 10.0                # PROVISIONAL: Height of LED pointer/tool above ground (Z=0)
 
-# Position of LED relative to camera/robot reference frame
-# Convention: +X = Right, +Y = Forward, +Z = Up
-CAMERA_TO_LED_FORWARD_CM = 5.0      # Forward distance from camera to LED (along +Y)
-CAMERA_TO_LED_LATERAL_CM = 0.0      # Lateral distance from camera to LED (along +X)
+# Physical separation between Camera and LED/Tool:
+# Coordinate convention in Robot Ground Frame:
+#   +Y = Robot forward
+#   -Y = Robot backward
+#   +X = Robot right
+#   -X = Robot left
+#
+# Sign convention for offsets:
+#   CAMERA_TO_LED_FORWARD_CM > 0: LED is mounted physically ahead (+Y) of camera.
+#   CAMERA_TO_LED_LATERAL_CM > 0: LED is mounted physically to the right (+X) of camera.
+#
+# Transformation formula (camera-frame floor coords -> LED-frame floor coords):
+#   X_led = X_camera - CAMERA_TO_LED_LATERAL_CM
+#   Y_led = Y_camera - CAMERA_TO_LED_FORWARD_CM
+#
+# Example:
+#   If the LED is physically 5 cm forward of the camera (CAMERA_TO_LED_FORWARD_CM = 5.0),
+#   a point directly below the camera (X_cam=0, Y_cam=0) appears at Y_led = -5.0 cm
+#   (5 cm behind the LED in LED coordinates).
+CAMERA_TO_LED_FORWARD_CM = 5.0      # Forward distance from camera to LED along +Y in cm
+CAMERA_TO_LED_LATERAL_CM = 0.0      # Lateral distance from camera to LED along +X in cm
 
 TARGET_FINAL_DISTANCE_CM = 5.0      # Desired distance to target point in cm
 

@@ -155,8 +155,17 @@ def main():
         height=args.height,
         fps_limit=args.fps,
     )
+    if not camera.is_opened and args.camera != 0:
+        print(f"[Camera Fallback] Camera index {args.camera} unavailable. Attempting fallback to built-in webcam (index 0)...")
+        camera = Camera(
+            device_id=0,
+            width=args.width,
+            height=args.height,
+            fps_limit=args.fps,
+        )
+
     if not camera.is_opened:
-        print(f"[ERROR] Unable to open camera device index {args.camera}.")
+        print(f"[ERROR] Unable to open camera device (tested index {args.camera} and fallback 0).")
         print("Tip: Run with '--list-cameras' to scan available camera indices.")
         sys.exit(1)
 
