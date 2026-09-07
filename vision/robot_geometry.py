@@ -58,6 +58,11 @@ from dataclasses import dataclass
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from config.vision_config import CAMERA_HEIGHT_CM
+except ImportError:
+    CAMERA_HEIGHT_CM = 6.0
+
 
 @dataclass
 class CalibrationPoint:
@@ -86,7 +91,7 @@ class RobotGeometry:
 
     def __init__(
         self,
-        camera_height_cm: float = 20.0,
+        camera_height_cm: float = CAMERA_HEIGHT_CM,
         camera_tilt_deg: Optional[float] = None,
         image_width: int = 640,
         image_height: int = 480,

@@ -68,17 +68,17 @@ CROSSHAIR_SIZE = 8
 # These values are INITIAL PROVISIONAL MATHEMATICAL PLACEHOLDERS for development.
 # They are NOT calibrated and MUST be measured and tuned on the physical hardware.
 
-CAMERA_HEIGHT_CM = 20.0             # PROVISIONAL: Camera lens optical center height above ground (Z=0)
+CAMERA_HEIGHT_CM = 6.0              # Camera lens optical center height above ground (Z=0) in cm
 CAMERA_TILT_DEG = 0.0               # DEPRECATED: Physical camera is top-down (pointing straight down).
                                     # Retained only for backwards compatibility with legacy callers.
 
 CAMERA_RESOLUTION_WIDTH = 640       # Camera image width in pixels
 CAMERA_RESOLUTION_HEIGHT = 480      # Camera image height in pixels
 
-CAMERA_FOV_HORIZONTAL_DEG = 70.0    # PROVISIONAL: Lens horizontal Field of View in degrees
-CAMERA_FOV_VERTICAL_DEG = 55.0      # PROVISIONAL: Lens vertical Field of View in degrees
+CAMERA_FOV_HORIZONTAL_DEG = 70.0    # Lens horizontal Field of View in degrees
+CAMERA_FOV_VERTICAL_DEG = 55.0      # Lens vertical Field of View in degrees
 
-LED_HEIGHT_CM = 10.0                # PROVISIONAL: Height of LED pointer/tool above ground (Z=0)
+LED_HEIGHT_CM = 10.0                # Height of LED pointer/tool above ground (Z=0)
 
 # Physical separation between Camera and LED/Tool:
 # Coordinate convention in Robot Ground Frame:
@@ -107,11 +107,42 @@ TARGET_FINAL_DISTANCE_CM = 5.0      # Desired distance to target point in cm
 # ==============================================================================
 # LOCK-AND-EXECUTE STATE MACHINE & BLIND-SPOT CONTROLLER SETTINGS
 # ==============================================================================
-STATE_MACHINE_TARGET_CLASS = "black_dot"    # Class to track and engage ('black_dot' or 'blue_dot')
+STATE_MACHINE_TARGET_CLASS = "weed"          # Class to track and engage ('weed' for new prototype)
 ALIGNMENT_TOLERANCE_XY_CM = 1.5             # Target alignment tolerance in cm (stop when within this distance of LED)
 CAMERA_BLIND_SPOT_ROW_PX = 430              # Pixel row (Y) above which dot enters camera lower blind spot
 SIMULATED_APPROACH_SPEED_CM_S = 8.0         # Simulated rover speed toward target in cm/s for dead-reckoning
 LED_FIRE_DURATION_SEC = 1.5                 # Duration to hold prototype LED firing signal in seconds
 COMPLETED_TARGET_EXPIRY_SEC = 15.0          # Time to remember completed targets to prevent immediate re-targeting
+
+# ==============================================================================
+# PHYSICAL LED MATRIX / ACTUATION INTERFACE SETTINGS
+# ==============================================================================
+LED_MATRIX_WIDTH_CM = 3.2          # Total physical width of the 8x8 LED matrix in cm
+LED_MATRIX_COLUMNS = 8             # Number of columns in the LED matrix (0 through 7)
+LED_MATRIX_COLUMN_WIDTH_CM = LED_MATRIX_WIDTH_CM / LED_MATRIX_COLUMNS  # 0.4 cm per column
+
+# ==============================================================================
+# CROP (DOT) & WEED (X) DETECTOR SETTINGS (Physical/Demo Prototype)
+# ==============================================================================
+CROP_CLASS_NAME = "crop"
+WEED_CLASS_NAME = "weed"
+
+MARKER_LOWER_HSV = (0, 0, 0)
+MARKER_UPPER_HSV = (180, 255, 85)           # Upper Value threshold for dark markers on light floor
+MARKER_MIN_AREA = 25.0
+MARKER_MAX_AREA = 8000.0
+
+# Crop circle parameters (approximately LED-sized)
+CROP_MIN_RADIUS = 3.0                       # Minimum radius in pixels
+CROP_MAX_RADIUS = 40.0                      # Maximum radius in pixels
+CROP_MIN_CIRCULARITY = 0.70                 # 4*pi*area / perimeter^2
+CROP_MIN_SOLIDITY = 0.85                    # area / hull_area
+CROP_MIN_CIRCLE_RATIO = 0.75                # area / enclosing circle area
+
+# Weed X marker parameters
+WEED_X_MAX_ASPECT = 1.85                    # Max aspect ratio max(w/h, h/w)
+WEED_X_MAX_SOLIDITY = 0.72                  # Weed X markers have concave bays (solidity <= 0.72)
+WEED_X_MAX_CIRCULARITY = 0.65               # Weed X markers have high perimeter (circularity < 0.65)
+WEED_X_LINE_MIN_LEN_RATIO = 0.25            # Min line length relative to bbox size
 
 

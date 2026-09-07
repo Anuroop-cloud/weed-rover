@@ -242,8 +242,8 @@ def test_invalid_and_out_of_bounds_inputs_handled_safely(default_geometry):
     assert default_geometry.pixel_to_ground(320.0, float("-inf")) is None
 
     # Strict max distance check
-    geom_strict = RobotGeometry(max_ground_distance_cm=5.0)
-    # A pixel far from center will exceed 5 cm
+    geom_strict = RobotGeometry(max_ground_distance_cm=2.0)
+    # A pixel far from center will exceed 2 cm (at (50, 50) distance is ~4.32 cm)
     assert geom_strict.pixel_to_ground(50.0, 50.0) is None
 
 

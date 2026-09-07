@@ -66,7 +66,7 @@ class TargetController:
     def __init__(
         self,
         geometry: Optional[RobotGeometry] = None,
-        target_class: str = "black_dot",
+        target_class: str = "weed",
         alignment_tolerance_cm: float = 1.5,
         blind_spot_row_px: int = 430,
         approach_speed_cm_s: float = 8.0,

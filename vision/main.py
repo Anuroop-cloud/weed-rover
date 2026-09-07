@@ -26,7 +26,8 @@ import cv2
 
 try:
     from vision.camera import Camera
-    from vision.dual_dot_detector import DualDotDetector
+    from vision.crop_weed_detector import CropWeedDetector
+    from vision.control_interface import WeedControlPipeline, LEDMatrixMapper
     from vision.robot_geometry import RobotGeometry
     from vision.target_controller import TargetController, RoverState
     from config.vision_config import (
@@ -34,12 +35,6 @@ try:
         FRAME_WIDTH,
         FRAME_HEIGHT,
         CAMERA_FPS,
-        BLACK_DOT_LOWER_HSV,
-        BLACK_DOT_UPPER_HSV,
-        BLACK_DOT_MIN_AREA,
-        BLACK_DOT_MAX_AREA,
-        BLUE_LOWER,
-        BLUE_UPPER,
         SHOW_MASK_DEBUG_WINDOW,
         FARM_ROI,
         STABILITY_MIN_HITS,
@@ -58,10 +53,15 @@ try:
         SIMULATED_APPROACH_SPEED_CM_S,
         LED_FIRE_DURATION_SEC,
         COMPLETED_TARGET_EXPIRY_SEC,
+        MARKER_MIN_AREA,
+        MARKER_MAX_AREA,
+        MARKER_LOWER_HSV,
+        MARKER_UPPER_HSV,
     )
 except ImportError:
     from camera import Camera
-    from dual_dot_detector import DualDotDetector
+    from crop_weed_detector import CropWeedDetector
+    from control_interface import WeedControlPipeline, LEDMatrixMapper
     from robot_geometry import RobotGeometry
     from target_controller import TargetController, RoverState
 
@@ -69,25 +69,23 @@ except ImportError:
     FRAME_WIDTH = 640
     FRAME_HEIGHT = 480
     CAMERA_FPS = 30.0
-    BLACK_DOT_LOWER_HSV = (0, 0, 0)
-    BLACK_DOT_UPPER_HSV = (180, 255, 75)
-    BLACK_DOT_MIN_AREA = 25.0
-    BLACK_DOT_MAX_AREA = 4000.0
-    BLUE_LOWER = (100, 50, 50)
-    BLUE_UPPER = (135, 255, 255)
+    MARKER_LOWER_HSV = (0, 0, 0)
+    MARKER_UPPER_HSV = (180, 255, 85)
+    MARKER_MIN_AREA = 25.0
+    MARKER_MAX_AREA = 8000.0
     SHOW_MASK_DEBUG_WINDOW = True
     FARM_ROI = (40, 30, 600, 450)
     STABILITY_MIN_HITS = 3
     MAX_MISSED_FRAMES = 3
     TARGET_MATCH_DISTANCE = 30.0
-    CAMERA_HEIGHT_CM = 20.0
-    CAMERA_TILT_DEG = 35.0
+    CAMERA_HEIGHT_CM = 6.0
+    CAMERA_TILT_DEG = 0.0
     CAMERA_FOV_HORIZONTAL_DEG = 70.0
     CAMERA_FOV_VERTICAL_DEG = 55.0
     CAMERA_TO_LED_FORWARD_CM = 5.0
     CAMERA_TO_LED_LATERAL_CM = 0.0
     LED_HEIGHT_CM = 10.0
-    STATE_MACHINE_TARGET_CLASS = "black_dot"
+    STATE_MACHINE_TARGET_CLASS = "weed"
     ALIGNMENT_TOLERANCE_XY_CM = 1.5
     CAMERA_BLIND_SPOT_ROW_PX = 430
     SIMULATED_APPROACH_SPEED_CM_S = 8.0
@@ -97,7 +95,7 @@ except ImportError:
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Mode B: Weed Rover Robot Execution Pipeline (Dot Detection & Targeting State Machine)"
+        description="Weed Rover Prototype Vision: Crop Dots (●) & Weed X Markers (X) with LED Matrix Mapping"
     )
     parser.add_argument(
         "--camera",
@@ -126,20 +124,20 @@ def parse_args():
     parser.add_argument(
         "--min-area",
         type=float,
-        default=BLACK_DOT_MIN_AREA,
-        help=f"Minimum dot area in pixels (default: {BLACK_DOT_MIN_AREA})",
+        default=MARKER_MIN_AREA,
+        help=f"Minimum marker area in pixels (default: {MARKER_MIN_AREA})",
     )
     parser.add_argument(
         "--max-area",
         type=float,
-        default=BLACK_DOT_MAX_AREA,
-        help=f"Maximum dot area in pixels (default: {BLACK_DOT_MAX_AREA})",
+        default=MARKER_MAX_AREA,
+        help=f"Maximum marker area in pixels (default: {MARKER_MAX_AREA})",
     )
     parser.add_argument(
         "--v-max",
         type=int,
-        default=BLACK_DOT_UPPER_HSV[2],
-        help=f"Maximum brightness/Value for black threshold (default: {BLACK_DOT_UPPER_HSV[2]})",
+        default=MARKER_UPPER_HSV[2],
+        help=f"Maximum brightness/Value for dark marker threshold (default: {MARKER_UPPER_HSV[2]})",
     )
     parser.add_argument(
         "--no-mask",
@@ -202,14 +200,8 @@ def main():
         print(f"[Error] Failed to initialize camera (tested index {args.camera} and fallback 0). Exiting.")
         sys.exit(1)
 
-    # 2. Initialize Dual Dot Detector (Black & Blue dots)
-    lower_hsv = (0, 0, 0)
-    upper_hsv = (180, 255, args.v_max)
-    detector = DualDotDetector(
-        black_lower_hsv=lower_hsv,
-        black_upper_hsv=upper_hsv,
-        blue_lower_hsv=BLUE_LOWER,
-        blue_upper_hsv=BLUE_UPPER,
+    # 2. Initialize Crop & Weed Marker Detector
+    detector = CropWeedDetector(
         min_area=args.min_area,
         max_area=args.max_area,
         roi=FARM_ROI,
@@ -231,7 +223,14 @@ def main():
         led_height_cm=LED_HEIGHT_CM,
     )
 
-    # 4. Initialize Lock-and-Execute Target Controller
+    # 4. Initialize AI Control Pipeline
+    control_pipeline = WeedControlPipeline(
+        geometry=geometry,
+        matrix_mapper=LEDMatrixMapper(),
+        target_classes=["weed"],
+    )
+
+    # 5. Initialize Lock-and-Execute Target Controller
     controller = TargetController(
         geometry=geometry,
         target_class=STATE_MACHINE_TARGET_CLASS,
@@ -243,14 +242,12 @@ def main():
     )
 
     window_name = "Weed Rover - Robot Execution (Mode B)"
-    black_mask_window = "Black Mask"
-    blue_mask_window = "Blue Mask"
+    mask_window = "Marker Mask"
     show_mask = not args.no_mask and (SHOW_MASK_DEBUG_WINDOW or args.debug)
 
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     if show_mask:
-        cv2.namedWindow(black_mask_window, cv2.WINDOW_NORMAL)
-        cv2.namedWindow(blue_mask_window, cv2.WINDOW_NORMAL)
+        cv2.namedWindow(mask_window, cv2.WINDOW_NORMAL)
 
     print(f"\n[Pipeline Ready] Robot execution loop running. Press 'q' or ESC to exit.\n")
 
@@ -268,36 +265,56 @@ def main():
             dt = max(0.001, min(0.2, now - last_time))
             last_time = now
 
-            # Step B: Run Dot Detection (Black + Blue dots with Temporal Stability & ROI)
-            targets, mask_black, mask_blue = detector.detect(frame)
+            # Step B: Run Crop & Weed Marker Detection
+            detections, mask = detector.detect(frame)
 
-            # Step C: Update Lock-and-Execute State Machine
+            # Step C: Generate AI Control Output (for Advay's control/ROS layer)
+            control_out = control_pipeline.process_detections(detections)
+            payload = control_out.to_control_payload()
+
+            # Step D: Update Lock-and-Execute State Machine (only receives weed detections)
+            weed_targets = [d for d in detections if d.class_name == "weed"]
             prev_state = controller.state
-            status = controller.update(targets, delta_time=dt)
+            status = controller.update(weed_targets, delta_time=dt)
 
             if args.debug and controller.state != prev_state:
                 print(f"[STATE MACHINE] {controller.last_state_change_msg}")
 
-            # Step D: Draw ROI boundary, target boxes, and state machine HUD overlay
-            annotated_frame = detector.draw_detections(frame, targets)
+            # Locate selected weed detection for visual debug
+            selected_weed = None
+            if control_out.weed_detected == 1 and control_out.center_pixel is not None:
+                for d in detections:
+                    if d.class_name == "weed" and (d.center_x, d.center_y) == control_out.center_pixel:
+                        selected_weed = d
+                        break
+
+            # Step E: Draw Visual Debug Overlay (Requirement 10)
+            annotated_frame = detector.draw_visual_debug(
+                frame=frame,
+                detections=detections,
+                selected_weed=selected_weed,
+                selected_x_cm=control_out.x_led_cm,
+                selected_y_cm=control_out.y_led_cm,
+                selected_column=control_out.column if control_out.weed_detected == 1 else None,
+                control_payload=payload,
+            )
             annotated_frame = controller.draw_hud(annotated_frame)
 
-            black_count = sum(1 for t in targets if t.is_stable and t.class_name == "black_dot")
-            blue_count = sum(1 for t in targets if t.is_stable and t.class_name == "blue_dot")
-            counts_str = f"Black: {black_count} | Blue: {blue_count}"
+            # Step F: Overlay FPS and control state
+            Camera.draw_fps(
+                annotated_frame,
+                camera.get_fps(),
+                detection_count=f"Weed: {payload['weed_detected']} | Col: {payload['column']}",
+            )
 
-            # Step E: Overlay FPS and counts
-            Camera.draw_fps(annotated_frame, camera.get_fps(), detection_count=counts_str)
-
-            # Step F: Display debug masks if enabled
+            # Step G: Display debug mask if enabled
             if show_mask:
-                cv2.imshow(black_mask_window, mask_black)
-                cv2.imshow(blue_mask_window, mask_blue)
+                cv2.imshow(mask_window, mask)
 
-            # Step G: Display main video stream
+            # Step H: Display main video stream
             cv2.imshow(window_name, annotated_frame)
 
-            # Step H: Handle quit key
+            # Step I: Handle quit key
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q") or key == 27:
                 print("[Pipeline] Exit requested by user.")
