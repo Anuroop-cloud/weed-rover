@@ -59,12 +59,17 @@ try:
         MARKER_LOWER_HSV,
         MARKER_UPPER_HSV,
     )
+    from vision.esp32_serial import ESP32Serial
 except ImportError:
     from camera import Camera
     from crop_weed_detector import CropWeedDetector
     from control_interface import WeedControlPipeline, LEDMatrixMapper
     from robot_geometry import RobotGeometry
     from target_controller import TargetController, RoverState
+    from esp32_serial import ESP32Serial
+
+    SERIAL_PORT = "/dev/ttyUSB0"
+    SERIAL_BAUD = 115200
 
     CAMERA_DEVICE_INDEX = 1
     FRAME_WIDTH = 640
@@ -155,6 +160,23 @@ def parse_args():
         action="store_true",
         help="List all detected camera device indices on the system and exit",
     )
+    parser.add_argument(
+        "--port",
+        type=str,
+        default=getattr(sys.modules.get('config.vision_config'), 'SERIAL_PORT', "/dev/ttyUSB0"),
+        help="Serial port for ESP32 (default: /dev/ttyUSB0)",
+    )
+    parser.add_argument(
+        "--baud",
+        type=int,
+        default=getattr(sys.modules.get('config.vision_config'), 'SERIAL_BAUD', 115200),
+        help="Serial baud rate (default: 115200)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print serial commands without connecting to hardware",
+    )
     return parser.parse_args()
 
 
@@ -180,6 +202,11 @@ def main():
     print(f"Target Class  : {STATE_MACHINE_TARGET_CLASS}")
     print(f"Dot Area Filter: [{args.min_area}, {args.max_area}] px")
     print("-" * 65)
+
+    # 0. Initialize Serial Connection
+    print(f"[Init] Connecting to ESP32 on {args.port} at {args.baud} baud...")
+    esp = ESP32Serial(port=args.port, baud=args.baud, dry_run=args.dry_run)
+    esp.send_startup()
 
     # 1. Initialize Camera Stream
     camera = Camera(
@@ -266,8 +293,12 @@ def main():
             status = executor.update(detections, delta_time=dt, current_time=now)
             payload = status.to_control_payload()
 
-            if args.debug and status.is_firing:
-                print(f"[CONTINUOUS EXECUTOR] Firing Columns: {status.firing_columns}")
+            if status.is_firing:
+                if args.debug:
+                    print(f"[CONTINUOUS EXECUTOR] Firing Columns: {status.firing_columns}")
+                esp.send_weed_detected() # Sends 11\n (LED ON, Motor ON)
+            else:
+                esp.send_move()          # Sends 01\n (LED OFF, Motor ON)
 
             # Step D: Draw Clean HUD (No target IDs, no state locking)
             annotated_frame = executor.draw_hud(
@@ -294,6 +325,9 @@ def main():
     except KeyboardInterrupt:
         print("\n[Pipeline] Interrupted by keyboard.")
     finally:
+        print("[Shutdown] Sending stop command to ESP32...")
+        esp.send_stop()
+        esp.close()
         camera.release()
         cv2.destroyAllWindows()
         print("[Pipeline] Shutdown complete.")
