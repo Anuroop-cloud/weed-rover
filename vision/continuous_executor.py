@@ -379,6 +379,8 @@ class ContinuousWeedExecutor:
         detections: List[Any],
         fps: float = 30.0,
         status: Optional[ContinuousStatus] = None,
+        serial_status: Optional[str] = None,
+        last_command: Optional[str] = None,
     ) -> np.ndarray:
         """
         Renders the clean, modern HUD for the continuous-forward prototype:
@@ -386,7 +388,7 @@ class ContinuousWeedExecutor:
         - X WEED in magenta with Column label (NO TARGET IDs)
         - FIRING BOUNDARY line
         - FIRING -> COLUMN X alert when active
-        - Clean top banner
+        - Clean top banner with optional serial status and last command
         """
         out = frame.copy()
         h, w = out.shape[:2]
@@ -494,15 +496,20 @@ class ContinuousWeedExecutor:
         cur_col = status.column if status else (lead_weed.column if lead_weed and hasattr(lead_weed, 'column') else -1)
         cur_weed = status.weed_detected if status else (1 if weed_dets else 0)
 
-        hud_text = (
-            f"FPS: {fps:.0f}  |  "
-            f"Crops: {len(crop_dets)}  |  "
-            f"Weeds: {len(weed_dets)}  |  "
-            f"Weed: {cur_weed}  |  "
-            f"Column: {cur_col}"
-        )
+        banner_items = [
+            f"FPS: {fps:.0f}",
+            f"Crops: {len(crop_dets)}",
+            f"Weeds: {len(weed_dets)}",
+            f"Column: {cur_col if cur_col >= 0 else '-'}",
+        ]
+        if serial_status:
+            banner_items.append(f"ESP32: {serial_status}")
+        if last_command:
+            banner_items.append(f"LAST CMD: {last_command}")
+
+        hud_text = "  |  ".join(banner_items)
         color_hud = (0, 255, 255) if cur_weed == 1 else (180, 180, 180)
-        cv2.putText(out, hud_text, (12, 24), font, 0.55, color_hud, 1, cv2.LINE_AA)
+        cv2.putText(out, hud_text, (12, 24), font, 0.48, color_hud, 1, cv2.LINE_AA)
 
         # 4. Firing Status Alert
         if status and status.is_firing:
