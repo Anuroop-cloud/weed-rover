@@ -41,7 +41,11 @@ class Camera:
 
     def _initialize_camera(self) -> bool:
         """Initializes the VideoCapture instance with target settings."""
-        print(f"[Camera] Initializing camera index {self.device_id} ({self.width}x{self.height})...")
+        # Convert numeric string to int (e.g. "1" -> 1), or keep URL string for IP cameras
+        if isinstance(self.device_id, str) and self.device_id.isdigit():
+            self.device_id = int(self.device_id)
+
+        print(f"[Camera] Initializing camera device {self.device_id} ({self.width}x{self.height})...")
         
         # On Windows, cv2.CAP_DSHOW can provide faster startup, but default backend is safe
         self.cap = cv2.VideoCapture(self.device_id)

@@ -29,6 +29,7 @@ try:
     from vision.crop_weed_detector import CropWeedDetector
     from vision.control_interface import WeedControlPipeline, LEDMatrixMapper
     from vision.robot_geometry import RobotGeometry
+    from vision.continuous_executor import ContinuousWeedExecutor
     from vision.target_controller import TargetController, RoverState
     from config.vision_config import (
         CAMERA_DEVICE_INDEX,
@@ -99,9 +100,9 @@ def parse_args():
     )
     parser.add_argument(
         "--camera",
-        type=int,
+        type=lambda x: int(x) if x.isdigit() else x,
         default=CAMERA_DEVICE_INDEX,
-        help=f"Camera device index (default: {CAMERA_DEVICE_INDEX})",
+        help=f"Camera device index (e.g. 0, 1) or phone stream URL (default: {CAMERA_DEVICE_INDEX})",
     )
     parser.add_argument(
         "--width",
@@ -223,22 +224,15 @@ def main():
         led_height_cm=LED_HEIGHT_CM,
     )
 
-    # 4. Initialize AI Control Pipeline
-    control_pipeline = WeedControlPipeline(
+    # 4. Initialize Continuous-Forward Weed Executor
+    # (Replaces old TargetController: no target IDs, no target-locking, no stopping)
+    executor = ContinuousWeedExecutor(
         geometry=geometry,
         matrix_mapper=LEDMatrixMapper(),
-        target_classes=["weed"],
-    )
-
-    # 5. Initialize Lock-and-Execute Target Controller
-    controller = TargetController(
-        geometry=geometry,
-        target_class=STATE_MACHINE_TARGET_CLASS,
-        alignment_tolerance_cm=ALIGNMENT_TOLERANCE_XY_CM,
-        blind_spot_row_px=CAMERA_BLIND_SPOT_ROW_PX,
-        approach_speed_cm_s=SIMULATED_APPROACH_SPEED_CM_S,
+        firing_boundary_row_px=CAMERA_BLIND_SPOT_ROW_PX,
+        rover_forward_speed_cm_s=SIMULATED_APPROACH_SPEED_CM_S,
+        camera_to_led_forward_cm=CAMERA_TO_LED_FORWARD_CM,
         fire_duration_sec=LED_FIRE_DURATION_SEC,
-        completed_expiry_sec=COMPLETED_TARGET_EXPIRY_SEC,
     )
 
     window_name = "Weed Rover - Robot Execution (Mode B)"
@@ -249,7 +243,7 @@ def main():
     if show_mask:
         cv2.namedWindow(mask_window, cv2.WINDOW_NORMAL)
 
-    print(f"\n[Pipeline Ready] Robot execution loop running. Press 'q' or ESC to exit.\n")
+    print(f"\n[Pipeline Ready] Robot continuous-forward execution running. Press 'q' or ESC to exit.\n")
 
     last_time = time.time()
 
@@ -268,57 +262,34 @@ def main():
             # Step B: Run Crop & Weed Marker Detection
             detections, mask = detector.detect(frame)
 
-            # Step C: Generate AI Control Output (for Advay's control/ROS layer)
-            control_out = control_pipeline.process_detections(detections)
-            payload = control_out.to_control_payload()
+            # Step C: Update Continuous-Forward Weed Executor
+            status = executor.update(detections, delta_time=dt, current_time=now)
+            payload = status.to_control_payload()
 
-            # Step D: Update Lock-and-Execute State Machine (only receives weed detections)
-            weed_targets = [d for d in detections if d.class_name == "weed"]
-            prev_state = controller.state
-            status = controller.update(weed_targets, delta_time=dt)
+            if args.debug and status.is_firing:
+                print(f"[CONTINUOUS EXECUTOR] Firing Columns: {status.firing_columns}")
 
-            if args.debug and controller.state != prev_state:
-                print(f"[STATE MACHINE] {controller.last_state_change_msg}")
-
-            # Locate selected weed detection for visual debug
-            selected_weed = None
-            if control_out.weed_detected == 1 and control_out.center_pixel is not None:
-                for d in detections:
-                    if d.class_name == "weed" and (d.center_x, d.center_y) == control_out.center_pixel:
-                        selected_weed = d
-                        break
-
-            # Step E: Draw Visual Debug Overlay (Requirement 10)
-            annotated_frame = detector.draw_visual_debug(
+            # Step D: Draw Clean HUD (No target IDs, no state locking)
+            annotated_frame = executor.draw_hud(
                 frame=frame,
                 detections=detections,
-                selected_weed=selected_weed,
-                selected_x_cm=control_out.x_led_cm,
-                selected_y_cm=control_out.y_led_cm,
-                selected_column=control_out.column if control_out.weed_detected == 1 else None,
-                control_payload=payload,
-            )
-            annotated_frame = controller.draw_hud(annotated_frame)
-
-            # Step F: Overlay FPS and control state
-            Camera.draw_fps(
-                annotated_frame,
-                camera.get_fps(),
-                detection_count=f"Weed: {payload['weed_detected']} | Col: {payload['column']}",
+                fps=camera.get_fps(),
+                status=status,
             )
 
-            # Step G: Display debug mask if enabled
+            # Step E: Display debug mask if enabled
             if show_mask:
                 cv2.imshow(mask_window, mask)
 
-            # Step H: Display main video stream
+            # Step F: Display main video stream
             cv2.imshow(window_name, annotated_frame)
 
-            # Step I: Handle quit key
+            # Step G: Handle quit key
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q") or key == 27:
                 print("[Pipeline] Exit requested by user.")
                 break
+
 
     except KeyboardInterrupt:
         print("\n[Pipeline] Interrupted by keyboard.")

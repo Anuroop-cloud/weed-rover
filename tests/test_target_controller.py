@@ -236,3 +236,101 @@ def test_hud_rendering_without_error(test_controller):
     test_controller.fire_timer = 1.0
     annotated_fire = test_controller.draw_hud(frame)
     assert annotated_fire.shape == (480, 640, 3)
+
+
+def test_multiple_weeds_acknowledged_simultaneously(test_controller):
+    """
+    Verify that ALL detected weed markers are acknowledged as targets,
+    tracked across their respective LED matrix columns, and visible in locked_target_ids.
+    """
+    t1 = Target(class_name="black_dot", target_id=101, center_x=120, center_y=200, area=100.0, is_stable=True)
+    t2 = Target(class_name="black_dot", target_id=102, center_x=320, center_y=220, area=100.0, is_stable=True)
+    t3 = Target(class_name="black_dot", target_id=103, center_x=520, center_y=210, area=100.0, is_stable=True)
+
+    status = test_controller.update([t1, t2, t3], delta_time=0.05)
+
+    assert status.state == RoverState.LOCKED_ON_TARGET
+    assert 101 in status.locked_target_ids
+    assert 102 in status.locked_target_ids
+    assert 103 in status.locked_target_ids
+    assert len(status.active_columns) >= 2
+    assert status.fire_active is False
+
+
+def test_no_firing_above_blind_spot_line(test_controller):
+    """
+    Verify that weeds visible above the camera blind spot threshold line (row < 430)
+    remain in APPROACHING mode and NEVER trigger premature firing.
+    """
+    t1 = Target(class_name="black_dot", target_id=201, center_x=200, center_y=250, area=100.0, is_stable=True)
+    t2 = Target(class_name="black_dot", target_id=202, center_x=440, center_y=320, area=100.0, is_stable=True)
+
+    # Tick 1: Locked
+    test_controller.update([t1, t2], delta_time=0.05)
+    # Tick 2: Approaching
+    status = test_controller.update([t1, t2], delta_time=0.05)
+
+    assert status.state == RoverState.APPROACHING
+    assert status.fire_active is False
+    assert 201 in test_controller.locked_target_ids
+    assert 202 in test_controller.locked_target_ids
+
+    # Tick 3: Advance closer to row 410 (< 430 blind spot line)
+    t1.center_y = 390
+    t2.center_y = 410
+    status = test_controller.update([t1, t2], delta_time=0.05)
+
+    assert status.state == RoverState.APPROACHING
+    assert status.fire_active is False  # Must NOT fire above blind spot line!
+
+
+def test_simultaneous_multi_column_firing_after_crossing_blind_spot(test_controller):
+    """
+    Verify full multi-column execution cycle:
+    1. Multiple weeds tracked across different columns
+    2. Crossing blind spot line (row >= 430) initiates BLIND_APPROACH
+    3. Dead-reckons to LED alignment
+    4. Halts at STOPPED
+    5. Fires ALL columns SIMULTANEOUSLY in FIRING mode
+    6. Marks all target IDs as COMPLETED
+    """
+    t1 = Target(class_name="black_dot", target_id=301, center_x=160, center_y=300, area=100.0, is_stable=True)
+    t2 = Target(class_name="black_dot", target_id=302, center_x=480, center_y=320, area=100.0, is_stable=True)
+
+    # 1. Lock on targets
+    test_controller.update([t1, t2], delta_time=0.05)
+    test_controller.update([t1, t2], delta_time=0.05)
+    assert test_controller.state == RoverState.APPROACHING
+
+    # 2. Weeds cross blind spot line (row >= 430)
+    t1.center_y = 435
+    t2.center_y = 445
+    status = test_controller.update([t1, t2], delta_time=0.05)
+
+    assert status.state == RoverState.BLIND_APPROACH
+    assert status.fire_active is False
+    firing_cols = list(test_controller.firing_columns)
+    assert len(firing_cols) >= 2  # Multiple distinct columns identified!
+
+    # 3. Dead-reckon to LED alignment
+    rem_time = test_controller.dead_reckon_remaining_cm / test_controller.approach_speed_cm_s
+    test_controller.update([], delta_time=rem_time + 0.1)
+    assert test_controller.state == RoverState.STOPPED
+    assert test_controller.fire_active is False
+
+    # 4. Trigger simultaneous firing
+    status = test_controller.update([], delta_time=0.05)
+    assert status.state == RoverState.FIRING
+    assert status.fire_active is True
+    assert status.firing_columns == firing_cols
+
+    # 5. Elapse firing duration -> COMPLETED
+    test_controller.update([], delta_time=test_controller.fire_duration_sec + 0.1)
+    assert test_controller.state == RoverState.COMPLETED
+    assert test_controller.fire_active is False
+
+    # 6. Resume SEARCHING & verify both targets completed
+    test_controller.update([], delta_time=0.05)
+    assert test_controller.state == RoverState.SEARCHING
+    assert 301 in test_controller.completed_targets
+    assert 302 in test_controller.completed_targets

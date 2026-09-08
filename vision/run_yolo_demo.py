@@ -53,9 +53,9 @@ def parse_args():
     )
     parser.add_argument(
         "--camera",
-        type=int,
+        type=lambda x: int(x) if x.isdigit() else x,
         default=CAMERA_DEVICE_INDEX,
-        help=f"Camera device index (default: {CAMERA_DEVICE_INDEX})",
+        help=f"Camera device index (e.g. 0, 1) or phone stream URL (default: {CAMERA_DEVICE_INDEX})",
     )
     parser.add_argument(
         "--conf",

@@ -68,6 +68,17 @@ except ImportError:
     MAX_MISSED_FRAMES = 3
     TARGET_MATCH_DISTANCE = 30.0
 
+try:
+    from vision.robot_geometry import RobotGeometry
+    from vision.control_interface import LEDMatrixMapper
+except ImportError:
+    try:
+        from robot_geometry import RobotGeometry
+        from control_interface import LEDMatrixMapper
+    except ImportError:
+        RobotGeometry = None
+        LEDMatrixMapper = None
+
 
 @dataclass
 class MarkerDetection:
@@ -163,12 +174,17 @@ class CropWeedDetector:
         max_missed_frames: int = MAX_MISSED_FRAMES,
         match_distance: float = TARGET_MATCH_DISTANCE,
         merge_distance: float = 16.0,
+        geometry: Optional[Any] = None,
+        matrix_mapper: Optional[Any] = None,
     ):
         self.lower_hsv = lower_hsv
         self.upper_hsv = upper_hsv
         self.min_area = float(min_area)
         self.max_area = float(max_area)
         self.roi = roi
+
+        self.geometry = geometry if geometry is not None else (RobotGeometry() if RobotGeometry is not None else None)
+        self.matrix_mapper = matrix_mapper if matrix_mapper is not None else (LEDMatrixMapper() if LEDMatrixMapper is not None else None)
 
         # Crop circle parameters
         self.crop_min_radius = float(crop_min_radius)
@@ -639,23 +655,63 @@ class CropWeedDetector:
                 cv2.line(out, (cx - w_half, cy + h_half), (cx + w_half, cy - h_half), color, thickness)
                 cv2.rectangle(out, (det.x1, det.y1), (det.x2, det.y2), color, 1)
 
-                if not is_selected:
+                # Compute ground coords and LED column for every detected weed
+                det_x_led, det_y_led, det_col = None, None, None
+                if is_selected and selected_x_cm is not None and selected_column is not None:
+                    det_x_led = selected_x_cm
+                    det_y_led = selected_y_cm
+                    det_col = selected_column
+                elif self.geometry and self.matrix_mapper:
+                    pt = self.geometry.pixel_to_ground(cx, cy)
+                    if pt is not None:
+                        led_pt = self.geometry.ground_to_led_frame(pt[0], pt[1])
+                        det_x_led, det_y_led = led_pt[0], led_pt[1]
+                        det_col = self.matrix_mapper.x_to_column(det_x_led)
+
+                # Target reticle corner brackets for every detected weed
+                reticle_color = (0, 255, 255) if is_selected else (0, 200, 255)
+                r_size = max(w_half, h_half) + 4
+                cv2.line(out, (cx - r_size, cy - r_size), (cx - r_size + 6, cy - r_size), reticle_color, 2)
+                cv2.line(out, (cx - r_size, cy - r_size), (cx - r_size, cy - r_size + 6), reticle_color, 2)
+                cv2.line(out, (cx + r_size, cy - r_size), (cx + r_size - 6, cy - r_size), reticle_color, 2)
+                cv2.line(out, (cx + r_size, cy - r_size), (cx + r_size, cy - r_size + 6), reticle_color, 2)
+                cv2.line(out, (cx - r_size, cy + r_size), (cx - r_size + 6, cy + r_size), reticle_color, 2)
+                cv2.line(out, (cx - r_size, cy + r_size), (cx - r_size, cy + r_size - 6), reticle_color, 2)
+                cv2.line(out, (cx + r_size, cy + r_size), (cx + r_size - 6, cy + r_size), reticle_color, 2)
+                cv2.line(out, (cx + r_size, cy + r_size), (cx + r_size, cy + r_size - 6), reticle_color, 2)
+
+                col_label = f"Col: {det_col}" if det_col is not None else ""
+                weed_label = f"WEED  {col_label}".strip()
+
+                cv2.putText(
+                    out,
+                    weed_label,
+                    (max(5, det.x1 - 10), max(16, det.y1 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.44,
+                    reticle_color,
+                    1,
+                    cv2.LINE_AA,
+                )
+
+                if det_x_led is not None and det_y_led is not None:
+                    coord_str = f"({det_x_led:+.1f}, {det_y_led:+.1f})cm"
                     cv2.putText(
                         out,
-                        "WEED",
-                        (cx - 20, det.y1 - 6),
+                        coord_str,
+                        (max(5, det.x1 - 10), min(out.shape[0] - 8, det.y2 + 14)),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.45,
-                        color,
+                        0.38,
+                        (0, 255, 255),
                         1,
                         cv2.LINE_AA,
                     )
 
-        # 3. Draw detailed overlay for the SELECTED weed
+        # 3. Draw detailed overlay for the active weed
         if selected_weed is not None:
             scx, scy = selected_weed.center_x, selected_weed.center_y
-            # Target reticle
-            cv2.circle(out, (scx, scy), 18, (0, 255, 255), 2)
+            # Target reticle circle
+            cv2.circle(out, (scx, scy), 20, (0, 255, 255), 2)
 
             info_lines = ["WEED"]
             if selected_x_cm is not None:
@@ -663,7 +719,7 @@ class CropWeedDetector:
             if selected_y_cm is not None:
                 info_lines.append(f"Y={selected_y_cm:.1f} cm")
             if selected_column is not None:
-                info_lines.append(f"COLUMN={selected_column}")
+                info_lines.append(f"Column={selected_column}")
 
             text_y = max(20, selected_weed.y1 - 8 - (len(info_lines) * 14))
             for i, line in enumerate(info_lines):
@@ -684,9 +740,15 @@ class CropWeedDetector:
         out[0:36, 0:out.shape[1]] = cv2.addWeighted(out[0:36, 0:out.shape[1]], 0.3, hud_bg, 0.7, 0)
 
         weed_flag = 1 if (control_payload and control_payload.get("weed_detected", 0) == 1) else 0
-        col_val = control_payload.get("column", -1) if control_payload else -1
+        cols_list = control_payload.get("columns", []) if control_payload else []
+        if not cols_list and control_payload and control_payload.get("column", -1) >= 0:
+            cols_list = [control_payload["column"]]
 
-        status_text = f"Weed: {weed_flag}  |  Column: {col_val}"
+        if len(cols_list) > 1:
+            status_text = f"Weeds: {len(cols_list)}  |  Columns: {cols_list}"
+        else:
+            col_val = cols_list[0] if cols_list else -1
+            status_text = f"Weed: {weed_flag}  |  Column: {col_val}"
         color_status = (0, 255, 255) if weed_flag == 1 else (180, 180, 180)
 
         cv2.putText(
@@ -715,3 +777,4 @@ class CropWeedDetector:
         )
 
         return out
+

@@ -34,7 +34,7 @@ camera frame -> YOLO detection -> candidate filtering -> ground projection via R
 import math
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
@@ -172,7 +172,8 @@ class WeedControlOutput:
     for the robot control and actuation system.
     """
     weed_detected: int  # 0 = no weed detected, 1 = weed detected
-    column: int         # -1 when weed_detected == 0; 0..7 when weed_detected == 1
+    column: int         # primary closest column (-1 when weed_detected == 0; 0..7 when weed_detected == 1)
+    columns: List[int] = field(default_factory=list)  # all active columns [0..7] with detected weeds
 
     # Diagnostic metadata (available internally; omitted from pure control payload)
     confidence: Optional[float] = None
@@ -198,16 +199,32 @@ class WeedControlOutput:
             "column": int(self.column),
         }
 
+    def to_multi_control_payload(self) -> Dict[str, Any]:
+        """
+        Returns multi-column payload for simultaneous actuation across multiple columns:
+        {
+            "weed_detected": 0 or 1,
+            "column": -1 or 0..7,
+            "columns": [0, 5]
+        }
+        """
+        return {
+            "weed_detected": int(self.weed_detected),
+            "column": int(self.column),
+            "columns": list(self.columns),
+        }
+
     @classmethod
     def no_weed(cls) -> "WeedControlOutput":
         """Factory method returning standard negative detection state."""
-        return cls(weed_detected=0, column=-1)
+        return cls(weed_detected=0, column=-1, columns=[])
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns full diagnostic dictionary including spatial and confidence metadata."""
         return {
             "weed_detected": self.weed_detected,
             "column": self.column,
+            "columns": self.columns,
             "confidence": round(self.confidence, 4) if self.confidence is not None else None,
             "bbox": self.bbox,
             "center_pixel": self.center_pixel,
@@ -336,12 +353,18 @@ class WeedControlPipeline:
         selected = valid_candidates[0]
         selected_det = selected["det"]
 
-        # 7. Map lateral X in tool frame to LED column 0..7
+        # 7. Map lateral X in tool frame to LED column 0..7 for all weeds
+        all_columns = sorted(list(set(
+            self.matrix_mapper.x_to_column(c["x_led"]) for c in valid_candidates
+        )))
+
+        # Primary closest weed column
         col = self.matrix_mapper.x_to_column(selected["x_led"])
 
         return WeedControlOutput(
             weed_detected=1,
             column=col,
+            columns=all_columns,
             confidence=round(float(selected_det.confidence), 4),
             bbox=selected_det.box,
             center_pixel=(selected_det.center_x, selected_det.center_y),
